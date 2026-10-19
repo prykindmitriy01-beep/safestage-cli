@@ -95,12 +95,6 @@ Settings, including the API key, are stored in a user-level file outside your pr
 
 Set `SAFESTAGE_HOME` to use another directory. The key is stored in plain text, so keep the file private. On Linux and macOS it is created with permissions `600`.
 
-Add the working folders to your project's `.gitignore`:
-
-```
-.safe_stage/
-.safe_backups/
-```
 
 ## Limits
 
