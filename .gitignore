@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+.safe_stage/
+.safe_backups/
+config.json
+secrets.json
+.env

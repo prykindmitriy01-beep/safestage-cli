@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "safestage-cli"
+version = "0.2.0"
+description = "Safe AI-assisted code editing: isolate the file, review the diff, approve, roll back."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["ai", "cli", "code-review", "diff", "rollback", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development",
+]
+dependencies = [
+    "pydantic>=2.0",
+    "google-genai",
+    "openai",
+    "anthropic",
+]
+
+[project.scripts]
+safestage-cli = "safestage.cli:main"
+safestage = "safestage.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+safestage = ["py.typed"]
