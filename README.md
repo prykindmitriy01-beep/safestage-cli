@@ -95,7 +95,6 @@ Settings, including the API key, are stored in a user-level file outside your pr
 
 Set `SAFESTAGE_HOME` to use another directory. The key is stored in plain text, so keep the file private. On Linux and macOS it is created with permissions `600`.
 
-
 ## Limits
 
 - At most 10 files per request.
