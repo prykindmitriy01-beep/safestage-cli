@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+from .keystore import ENV_KEY, SecretStoreError, delete_key, get_key, set_key
+from .paths import config_dir, write_private
 from .providers import PROVIDERS, Provider
 from .ui import error
+
+_migration_warned = False
 
 
 @dataclass(frozen=True)
@@ -19,36 +23,60 @@ class Config:
     model: str
 
 
-def config_dir() -> Path:
-    override = os.environ.get("SAFESTAGE_HOME")
-    if override:
-        return Path(override)
-    if os.name == "nt":
-        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
-    else:
-        base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
-    return base / "safestage"
-
-
 def config_path() -> Path:
     return config_dir() / "config.json"
 
 
-def load_config() -> Optional[Config]:
+def _read_raw() -> Optional[Dict[str, Any]]:
     try:
         raw = json.loads(config_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    if not isinstance(raw, dict):
+    return raw if isinstance(raw, dict) else None
+
+
+def _migrate_legacy_key(raw: Dict[str, Any], provider: str, key: str) -> None:
+    """Move a plain-text ``api_key`` from an old config.json into the key store.
+
+    The old value is erased only after the key store returned it unchanged on
+    read-back. If anything fails the file is left as it was and the key keeps
+    working from there.
+    """
+    global _migration_warned
+    try:
+        destination = set_key(provider, key)
+        cleaned = {name: value for name, value in raw.items() if name != "api_key"}
+        write_private(config_path(), json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n")
+    except (SecretStoreError, OSError) as exc:
+        if not _migration_warned:
+            _migration_warned = True
+            error(f"could not move the API key out of config.json: {exc}")
+        return
+    print(
+        f"[safestage] API key moved from config.json to {destination}. "
+        "Old copies of the file may remain on disk, rotate the key if it was ever shared or synced."
+    )
+
+
+def load_config() -> Optional[Config]:
+    raw = _read_raw()
+    if raw is None:
         return None
 
     provider = raw.get("provider")
-    api_key = raw.get("api_key")
     model = raw.get("model")
     base_url = raw.get("base_url")
     if not (isinstance(provider, str) and provider in PROVIDERS):
         return None
-    if not (isinstance(api_key, str) and api_key and isinstance(model, str) and model):
+    if not (isinstance(model, str) and model):
+        return None
+
+    legacy = raw.get("api_key")
+    legacy_key = legacy if isinstance(legacy, str) and legacy else None
+    if legacy_key:
+        _migrate_legacy_key(raw, provider, legacy_key)
+    api_key = get_key(provider) or legacy_key
+    if not api_key:
         return None
 
     url = base_url if isinstance(base_url, str) and base_url else None
@@ -57,24 +85,26 @@ def load_config() -> Optional[Config]:
     return Config(provider, api_key, url, model)
 
 
-def save_config(config: Config) -> None:
-    path = config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(asdict(config), indent=2, ensure_ascii=False) + "\n"
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        handle.write(payload)
-    if os.name != "nt":
-        path.chmod(0o600)
+def save_config(config: Config) -> str:
+    """Save settings and return where the API key was stored."""
+    previous = (_read_raw() or {}).get("provider")
+    destination = set_key(config.provider, config.api_key)
+    payload = {"provider": config.provider, "base_url": config.base_url, "model": config.model}
+    write_private(config_path(), json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    if isinstance(previous, str) and previous != config.provider:
+        delete_key(previous)
+    return destination
 
 
 def _apply(config: Config) -> Optional[Config]:
     try:
-        save_config(config)
-    except OSError as exc:
+        destination = save_config(config)
+    except (OSError, SecretStoreError) as exc:
         error(f"config write failed: {exc}")
         return None
-    print(f"[safestage] Saved: {PROVIDERS[config.provider].title} / {config.model}")
+    print(f"[safestage] Saved: {PROVIDERS[config.provider].title} / {config.model}, API key in {destination}")
+    if os.environ.get(ENV_KEY, "").strip():
+        print(f"[safestage] Note: {ENV_KEY} is set and takes priority over the saved key.")
     return config
 
 
