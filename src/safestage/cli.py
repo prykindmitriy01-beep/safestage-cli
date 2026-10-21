@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 import textwrap
 from dataclasses import dataclass, field
@@ -33,8 +34,11 @@ HELP_TEXT = (
     "  reset            clear chat history\n"
     "  config           change provider, model, API key or base URL\n"
     "  model            change model of the current provider\n"
-    "  panic <file>     restore the file from the latest backup,\n"
-    "                   or remove it if SafeStage created it\n"
+    "  panic <file> [N] restore the file from the latest backup (or from point N\n"
+    "                   of its history), or remove it if SafeStage created it;\n"
+    "                   the current content is saved first\n"
+    "  redo <file>      undo the last panic of that file\n"
+    "  history <file>   list the backups and rollback points of the file\n"
     "  help             show this list\n"
     "  exit             quit"
 )
@@ -57,6 +61,14 @@ class Session:
 
 def _clean_name(value: Optional[str]) -> str:
     return (value or "").strip().strip("'\"")
+
+
+def _split_point(argument: str) -> Tuple[str, Optional[int]]:
+    """Split "path/to/file.py 2" into the path and the history point."""
+    match = re.fullmatch(r"(.+?)\s+(\d+)", argument.strip())
+    if match is None:
+        return _clean_name(argument), None
+    return _clean_name(match.group(1)), int(match.group(2))
 
 
 def _load_target(core: SafeStageCore, filename: str) -> Optional[Tuple[bool, str]]:
@@ -291,9 +303,18 @@ def main(argv: Optional[List[str]] = None) -> None:
             continue
         if command == "panic":
             if len(parts) == 2:
-                session.core.panic_rollback(parts[1].strip().strip("'\""))
+                name, point = _split_point(parts[1])
+                session.core.panic_rollback(name, point)
             else:
-                print("panic <file>")
+                print("panic <file> [N]")
+            continue
+        if command in ("redo", "history") and not bare and " " not in parts[1].strip():
+            # "redo the login function in auth.py" is a normal request, only a lone path is the command
+            name = _clean_name(parts[1])
+            if command == "redo":
+                session.core.redo(name)
+            else:
+                session.core.history(name)
             continue
 
         dispatch(session, session.mode, line)
